@@ -1,0 +1,408 @@
+import java.awt.Color;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Random;
+
+
+// This is the library I'm using to run my game.
+// Its documentation and download can be found at https://course.ccs.neu.edu/cs2510/image-doc.html
+import javalib.impworld.*;
+import javalib.worldimages.*;
+
+// This is the library I'm using to write tests for my functions.
+// Its documentation and download can be found at https://course.ccs.neu.edu/cs2510/tester-doc.html
+import tester.*;
+
+class RunGame {
+  public static void main(String args[]) {
+    int width = Integer.parseInt(args[0]);
+    int height = Integer.parseInt(args[1]);
+    int bombs = Integer.parseInt(args[2]);
+    Minesweep gameBoard = new Minesweep(width, height, bombs);
+    
+    gameBoard.bigBang(width * Cell.CELL_SIZE, height * Cell.CELL_SIZE);
+  }
+}
+
+class Minesweep extends World{
+  Cell[][] board;
+  int height;
+  int width;
+  int numBombs;
+  boolean playerBlewUp;
+  int bombsRemaining;
+  int unrevealedRemaining;
+  boolean started;
+  
+  // Maximum percentage of bombs allowed
+  static final double MAX_BOMBS = 0.3;
+  static final Color MESSAGE_COLOR = Color.ORANGE;
+  
+  Minesweep(int width, int height, int numBombs) {
+    if ((numBombs / (float)(width * height)) > MAX_BOMBS || numBombs <= 0) {
+      throw new RuntimeException(
+          "Invalid number of bombs: Must be positive and less than"
+          + Double.toString(MAX_BOMBS * 100) + "% of the tiles");
+    } else {
+      this.height = height;
+      this.width = width;
+      this.numBombs = numBombs;
+      this.bombsRemaining = numBombs;
+      this.playerBlewUp = false;
+      this.makeBoard(numBombs);
+    }
+  }
+  
+  void initializeSweep() {
+    this.makeBoard(numBombs);
+    this.playerBlewUp = false;
+    this.bombsRemaining = numBombs;
+  }
+
+  // Draw this board so it can be displayed on the screen
+  public WorldScene makeScene() {
+    WorldScene board = new WorldScene(this.width * Cell.CELL_SIZE, this.height * Cell.CELL_SIZE);
+    for (int x = 0; x < this.width; x++) {
+      for (int y = 0; y < this.height; y++) {
+        board.placeImageXY(this.board[x][y].draw(), x * Cell.CELL_SIZE, y * Cell.CELL_SIZE);
+      }
+    }
+    if (this.playerBlewUp) {
+      board.placeImageXY(this.explodedMessage(this.height * Cell.CELL_SIZE / 4), 
+          this.width * Cell.CELL_SIZE / 2, this.height * Cell.CELL_SIZE / 2);
+    } else if (this.bombsRemaining == 0) {
+      board.placeImageXY(this.winMessage(this.height * Cell.CELL_SIZE / 4), 
+          this.width * Cell.CELL_SIZE / 2, this.height * Cell.CELL_SIZE / 2);
+    }
+    return board;
+  }
+
+  private WorldImage explodedMessage(double fontSize) {
+    return new TextImage("Boom!", fontSize, MESSAGE_COLOR);
+  }
+  
+  private WorldImage winMessage(double fontSize) {
+    return new TextImage("You win!", fontSize, MESSAGE_COLOR);
+  }
+
+  // Change the world when the player presses the given button at the given location on the screen
+  public void onMousePressed(Posn loc, String button) {
+    if (!this.playerBlewUp && this.bombsRemaining > 0) {
+      Cell affectedCell = this.cellClicked(loc);
+      if (button == "RightButton") {
+        this.bombsRemaining = this.bombsRemaining - affectedCell.mark();
+      }
+      else if (button == "LeftButton") {
+        this.playerBlewUp = affectedCell.reveal();
+      }
+    }
+  }
+  
+  public void onKeyEvent(String s) {
+    if (s.equals("r")) {
+      this.initializeSweep();
+    }
+  }
+
+  private Cell cellClicked(Posn loc) {
+    return this.board[loc.x / Cell.CELL_SIZE][loc.y / Cell.CELL_SIZE];
+  }
+  
+  // EFFECT: Create a new board of size (this.width, this.height) with unrevealed tiles 
+  void makeBoard(int numBombs) {
+    this.board = new Cell[width][height];
+    this.addTiles();
+    this.addBombs(numBombs);
+    this.addCounts();
+  }
+
+  // EFFECT: Add the appropriate number of tiles to this.board to create a new board,
+  //         then link the tiles
+  void addTiles() {
+    for (int x = 0; x < this.width; x++) {
+      for (int y = 0; y < this.height; y++) {
+        this.board[x][y] = new Cell();
+      }
+    }
+    this.linkTiles();
+  }
+
+  // Give all of the minesweep tiles on this board the correct neighbors
+  private void linkTiles() {
+    for (int y = 0; y < this.height; y++) {
+      for (int x = 0; x < this.width; x++) {
+        this.board[x][y].addNeighbors(this.board, x, y);
+      }
+    } 
+  }
+  
+  // Add numBombs bomb tiles to this board
+  void addBombs(int numBombs) {
+    int bombsPlaced = 0;
+    Random ran = new Random();
+    for (int x = 0; x < this.width; x++) {
+      for (int y = 0; y < this.width; y++) {
+        this.board[x][y].isBomb = false;
+      }
+    }
+    
+    while (bombsPlaced  < numBombs) {
+      int x = (int)Math.floor(ran.nextDouble() * this.width);
+      int y = (int)Math.floor(ran.nextDouble() * this.width);
+      if (!this.board[x][y].isBomb) {
+        bombsPlaced++;
+        this.board[x][y].isBomb = true;
+      }
+    }
+  }
+  
+  // EFFECT: Update the count of the number of bombs each tile is bordering
+  void addCounts() {
+    for (int x = 0; x < this.width; x++) {
+      for (int y = 0; y < this.height; y++) {
+        this.board[x][y].updateCount();
+      }
+    }
+  }
+
+  // When you're iterating on the tile at (x, y), how many tiles are there to go?
+  // Assume you're going row by row, and the current tile is included in the count
+  int squaresRemaining(int x, int y) {
+    return this.width * this.height - (y * this.width + x);
+  }
+}
+
+
+class Cell {
+  ArrayList<Cell> neighbors;
+  boolean isBomb;
+  boolean isMarked;
+  boolean isRevealed;
+  int neighborBombs;
+  
+  static final int CELL_SIZE = 40;
+  
+  static final Color BOMB = Color.RED;
+  static final Color MARKED = Color.PINK;
+  static final Color UNREVEALED = Color.GRAY;
+  static final Color REVEALED_0 = Color.WHITE;
+  static final Color REVEALED_NUM = Color.LIGHT_GRAY;
+  static final Color DETAILS = Color.BLACK;
+  
+  Cell() {
+    this.neighbors = new ArrayList<Cell>();
+    this.isBomb = false;
+    this.isMarked = false;
+    this.isRevealed = false;
+    this.neighborBombs = 0;
+  }
+
+  // Did the player reveal a bomb?
+  // EFFECT: If they did not, reveal the empty square. 
+  // If it has no bomb neighbors, also reveal its neighbors. 
+  public boolean reveal() {
+    if (this.isMarked) {
+      return false;
+    } else if (!this.isBomb) {
+      HashMap<Cell, Boolean> visited = new HashMap<Cell, Boolean>();
+      this.revealRecur(visited);
+      return false;
+    } else {
+      this.isRevealed = true;
+      return true;
+    }
+  }
+
+  private void revealRecur(HashMap<Cell, Boolean> visited) {
+    if (!visited.containsKey(this)) {
+      this.isRevealed = true;
+      visited.put(this, true);
+      
+      if (this.neighborBombs == 0) {
+        for (Cell c : this.neighbors) {
+          c.revealRecur(visited);
+        }
+      }
+    }
+  }
+
+  // Return the number of bombs marked by marking this cell
+  public int mark() {
+    int output = 0;
+    if (this.isMarked && this.isBomb) { 
+      output = -1;
+    } else if (!this.isMarked && this.isBomb) {
+      output = 1;
+    }
+    this.isMarked = !this.isMarked;
+    return output;
+  }
+
+  public WorldImage draw() {
+    if (this.isMarked && !this.isRevealed) {
+      return this.drawCell(MARKED);
+    } else if (!this.isRevealed) {
+      return this.drawCell(UNREVEALED);
+    } else if (this.isBomb) {
+      return this.drawCell(BOMB);
+    } else {
+      return this.drawRevealedCell();
+    }
+  }
+
+  // Draw this cell, assuming it is a marked, unrevealed cell
+  private WorldImage drawCell(Color cellColor) {
+    return new OverlayImage(
+        new RectangleImage(CELL_SIZE, CELL_SIZE, OutlineMode.OUTLINE, DETAILS),
+        new RectangleImage(CELL_SIZE, CELL_SIZE, OutlineMode.SOLID, cellColor))
+        .movePinhole(CELL_SIZE / -2, CELL_SIZE / -2);
+        
+  }
+  
+  private WorldImage drawRevealedCell() {
+    if (this.neighborBombs == 0) {
+      return drawCell(REVEALED_0);
+    } else {
+      return new OverlayOffsetImage(
+          new TextImage(Integer.toString(this.neighborBombs), 0.8 * CELL_SIZE, DETAILS), 
+          CELL_SIZE / -2, CELL_SIZE / -2,
+          this.drawCell(REVEALED_NUM))
+          .movePinhole(CELL_SIZE / -2, CELL_SIZE / -2);
+    }
+  }
+
+  // EFFECT: Count the number of bombs neighboring this cell and 
+  public void updateCount() {
+    this.neighborBombs = 0;
+    for (Cell c : this.neighbors) {
+      if (c.isBomb) {
+        this.neighborBombs++;
+      }
+    }
+  }
+
+  // A neighbors to this cell assuming it is at the position x y on the given board
+  public void addNeighbors(Cell[][] board, int x, int y) {
+    for (Posn pos : this.possibleNeighbors(x, y)) {
+      if (!(pos.x < 0 || pos.y < 0 || pos.x >= board.length || pos.y >= board[0].length)) {
+        this.neighbors.add(board[pos.x][pos.y]);
+      }
+    }
+  }
+
+  // Return all of indices of possible neighbors at the location (x, y),
+  // Regardless of whether or not they are valid indices on the board
+  private ArrayList<Posn> possibleNeighbors(int x, int y) {
+    ArrayList<Posn> locs = new ArrayList<Posn>();
+    locs.add(new Posn(x - 1, y -1));
+    locs.add(new Posn(x, y - 1));
+    locs.add(new Posn(x + 1, y - 1));
+    locs.add(new Posn(x - 1, y));
+    locs.add(new Posn(x + 1, y));
+    locs.add(new Posn(x - 1, y + 1));
+    locs.add(new Posn(x, y + 1));
+    locs.add(new Posn(x + 1, y + 1));
+    return locs;
+  }
+}
+
+class ExamplesMinesweep {
+  
+  int testWidth1 = 10;
+  int testHeight1 = 10;
+  int testBombs1 = 25;
+  Minesweep testSweep1 = new Minesweep(testWidth1, testHeight1, testBombs1);
+  
+  
+  void testSquaresRemaining(Tester t) {
+    new ExamplesMinesweep().squaresTester(t, testSweep1);
+  }
+  
+  void squaresTester(Tester t, Minesweep sweep) {
+    for (int x = 1; x <= sweep.width; x++) {
+      for (int y = 1; y <= sweep.height; y++) {
+        t.checkExpect(testSweep1.squaresRemaining(sweep.width - x, sweep.height - y), 
+            (y - 1) * sweep.width + x);
+        t.checkExpect(testSweep1.squaresRemaining(x - 1, y - 1) > 0, true);
+      }
+    }
+  }
+  
+  
+  void testSweepCreation(Tester t) {
+    //new ExamplesMinesweep().cellsFilledIn(t, testSweep1);
+    //new ExamplesMinesweep().cellsWellLinked(t, testSweep1);
+    new ExamplesMinesweep().bombCountCorrect(t, testSweep1, testBombs1);
+  }
+
+  void cellsFilledIn(Tester t, Minesweep sweep) {
+    for (int x = 0; x < sweep.width; x++) {
+      for (int y = 0; y < sweep.height; y++) {
+        t.checkExpect(sweep.board[x][y]!= null, true);
+      }
+    }
+  }
+  
+  // EFFECT: Tests that all cells in this sweep have correct neighbors
+  void cellsWellLinked(Tester t, Minesweep sweep) {
+    new ExamplesMinesweep().verticalLinks(t, sweep);
+    new ExamplesMinesweep().horizontalLinks(t, sweep);
+    new ExamplesMinesweep().diagonalUpLinks(t, sweep);
+    new ExamplesMinesweep().diagonalDownLinks(t, sweep);
+  }
+
+  // EFFECT: Tests all vertical links in this board
+  private void verticalLinks(Tester t, Minesweep sweep) {
+    for (int x = 0; x < sweep.width; x++) {
+      for (int y = 0; y < sweep.height - 1; y++) {
+        t.checkExpect(new ExamplesMinesweep().areNeighbors(sweep.board[x][y], sweep.board[x][y + 1]), true);
+      }
+    }
+  }
+  
+  // EFFECT: Tests all horizontal links in this sweep's board
+  private void horizontalLinks(Tester t, Minesweep sweep) {
+    for (int x = 0; x < sweep.width - 1; x++) {
+      for (int y = 0; y < sweep.height; y++) {
+        t.checkExpect(new ExamplesMinesweep().areNeighbors(sweep.board[x][y], sweep.board[x + 1][y]), true);
+      }
+    }
+  }
+  
+  // EFFECT: Tests that all links in the diagonal right and up direction are correct
+  private void diagonalUpLinks(Tester t, Minesweep sweep) {
+    for (int x = 0; x < sweep.width - 1; x++) {
+      for (int y = 1; y < sweep.height; y++) {
+        t.checkExpect(new ExamplesMinesweep().areNeighbors(sweep.board[x][y], sweep.board[x + 1][y - 1]), true);
+      }
+    }
+  }
+  
+  // EFFECT: Tests that all links in the diagonal right and up direction are correct
+  private void diagonalDownLinks(Tester t, Minesweep sweep) {
+    for (int x = 0; x < sweep.width - 1; x++) {
+      for (int y = 0; y < sweep.height - 1; y++) {
+        t.checkExpect(new ExamplesMinesweep().areNeighbors(sweep.board[x][y], sweep.board[x + 1][y + 1]), true);
+      }
+    }
+  }
+
+
+  // Do these cells both have each other as neighors?
+  private boolean areNeighbors(Cell cell1, Cell cell2) {
+    return cell1.neighbors.contains(cell2) && cell2.neighbors.contains(cell1);
+  }
+  
+  private void bombCountCorrect(Tester t, Minesweep sweep, int bombs) {
+    int bombCount = 0;
+    for (int x = 0; x < sweep.width; x++) {
+      for (int y = 0; y < sweep.height; y++) {
+        if (sweep.board[x][y].isBomb) {
+          bombCount++;
+        }
+      }
+    }
+    t.checkExpect(bombCount, bombs);
+  }
+}

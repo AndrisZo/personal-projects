@@ -1,0 +1,6 @@
+INDEX VERSION 1.131+/Users/andriszonies/Desktop/Outside_Projects/Java Projects/.metadata/.plugins/org.eclipse.jdt.core
+1239738318.index
+2585418274.index
+1225384508.index
+1525171342.index
+2206048928.index
